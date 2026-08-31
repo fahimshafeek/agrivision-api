@@ -17,7 +17,7 @@ RUN pip install --no-cache-dir \
     --extra-index-url https://download.pytorch.org/whl/cpu && \
     pip install --no-cache-dir \
     fastapi==0.104.1 uvicorn==0.24.0 \
-    python-multipart==0.0.6 Pillow==10.1.0
+    python-multipart==0.0.6 Pillow==10.1.0 "numpy<2.0.0"
 
 # Copy application files
 COPY app.py vision_model.pth ./
