@@ -14,7 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Python dependencies (CPU-only PyTorch for deployment)
 RUN pip install --no-cache-dir \
     torch==2.1.0+cpu torchvision==0.16.0+cpu \
-    --index-url https://download.pytorch.org/whl/cpu && \
+    --extra-index-url https://download.pytorch.org/whl/cpu && \
     pip install --no-cache-dir \
     fastapi==0.104.1 uvicorn==0.24.0 \
     python-multipart==0.0.6 Pillow==10.1.0
