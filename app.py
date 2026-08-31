@@ -1,9 +1,6 @@
 # ============================================================
 # FastAPI Vision AI Microservice — Track A: AgriVision
 # ============================================================
-# CONSTRAINT #2: Uncertainty Rule
-#   If top confidence < 75%, return {"prediction": "Uncertain"}
-# ============================================================
 
 import io
 import torch
@@ -13,6 +10,13 @@ from torchvision import models, transforms
 from PIL import Image
 from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import JSONResponse, HTMLResponse
+
+app = FastAPI(title="AgriVision — Vision AI Microservice")
+
+# ---- Configuration ----
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+MODEL_PATH = "vision_model.pth"
+CONFIDENCE_THRESHOLD = 0.75  # Uncertainty Rule threshold
 
 HTML_CONTENT = """
 <!DOCTYPE html>
@@ -46,30 +50,23 @@ HTML_CONTENT = """
     </style>
 </head>
 <body>
-
 <div class="container">
     <h1>🌱 AgriVision AI</h1>
     <p class="subtitle">Upload a plant leaf image to detect Blight, Spot, or Healthy status.</p>
-
     <div class="upload-area" id="drop-zone" onclick="document.getElementById('file-input').click()">
         <p>Drag & Drop or Click to Upload</p>
         <input type="file" id="file-input" accept="image/*" onchange="previewImage(event)">
     </div>
-
     <img id="preview" alt="Image Preview">
-
     <button id="predict-btn" onclick="uploadAndPredict()" disabled>Analyze Leaf</button>
-
     <div id="result">
         <h2 id="pred-text" style="margin-top:0; margin-bottom: 5px;"></h2>
         <p id="conf-text" style="margin: 0; font-size: 0.9em; margin-bottom: 15px;"></p>
         <div id="prob-container"></div>
     </div>
 </div>
-
 <script>
     let currentFile = null;
-
     function previewImage(event) {
         const file = event.target.files[0];
         if (file) {
@@ -85,7 +82,6 @@ HTML_CONTENT = """
             reader.readAsDataURL(file);
         }
     }
-
     const dropZone = document.getElementById('drop-zone');
     dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.style.background = '#ebf5fb'; });
     dropZone.addEventListener('dragleave', (e) => { e.preventDefault(); dropZone.style.background = 'transparent'; });
@@ -97,7 +93,6 @@ HTML_CONTENT = """
             previewImage({ target: { files: e.dataTransfer.files } });
         }
     });
-
     async function uploadAndPredict() {
         if (!currentFile) return;
         const btn = document.getElementById('predict-btn');
@@ -105,22 +100,17 @@ HTML_CONTENT = """
         const predText = document.getElementById('pred-text');
         const confText = document.getElementById('conf-text');
         const probContainer = document.getElementById('prob-container');
-
         btn.innerText = 'Analyzing...';
         btn.disabled = true;
         resDiv.style.display = 'none';
         probContainer.innerHTML = '';
-
         const formData = new FormData();
         formData.append('file', currentFile);
-
         try {
             const response = await fetch('/predict', { method: 'POST', body: formData });
             const data = await response.json();
-
             resDiv.style.display = 'block';
             resDiv.className = '';
-
             if (data.error) {
                 resDiv.classList.add('error');
                 predText.innerText = 'Error';
@@ -128,19 +118,16 @@ HTML_CONTENT = """
             } else {
                 predText.innerText = data.prediction.toUpperCase();
                 confText.innerText = `Confidence: ${data.confidence}%`;
-
                 if (data.prediction === 'Uncertain') {
                     resDiv.classList.add('uncertain');
                     if (data.note) confText.innerText += ` (${data.note})`;
                 } else {
                     resDiv.classList.add('success');
                 }
-
                 for (const [cls, prob] of Object.entries(data.probabilities)) {
                     const percent = (prob * 100).toFixed(1);
                     const isMax = cls === data.prediction.toLowerCase() || (data.prediction === 'Uncertain' && parseFloat(percent) === data.confidence);
                     const color = isMax ? (data.prediction === 'Uncertain' ? '#f39c12' : '#2ecc71') : '#95a5a6';
-
                     probContainer.innerHTML += `
                         <div class="prob-bar-container">
                             <div class="prob-label">${cls}</div>
@@ -167,21 +154,7 @@ HTML_CONTENT = """
 </html>
 """
 
-@app.get('/', response_class=HTMLResponse)
-async def serve_frontend():
-    return HTML_CONTENT
-
-
-app = FastAPI(title="AgriVision — Vision AI Microservice")
-
-# ---- Configuration ----
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-MODEL_PATH = "vision_model.pth"
-CONFIDENCE_THRESHOLD = 0.75  # Uncertainty Rule threshold
-
-
 def load_model():
-    """Load the trained EfficientNet-B0 model from checkpoint."""
     checkpoint = torch.load(MODEL_PATH, map_location=DEVICE, weights_only=False)
     classes = checkpoint['classes']
     num_classes = checkpoint['num_classes']
@@ -190,7 +163,6 @@ def load_model():
     imagenet_std = checkpoint['imagenet_std']
     cfg = checkpoint['classifier_config']
 
-    # Rebuild model architecture
     model = models.efficientnet_b0(weights=None)
     in_features = cfg['in_features']
     model.classifier = nn.Sequential(
@@ -212,10 +184,12 @@ def load_model():
 
     return model, classes, preprocess
 
-
 # Load model at startup
 model, CLASSES, preprocess = load_model()
 
+@app.get('/', response_class=HTMLResponse)
+async def serve_frontend():
+    return HTML_CONTENT
 
 @app.get('/health')
 async def health():
@@ -226,16 +200,13 @@ async def health():
         'classes': list(CLASSES),
     }
 
-
 @app.post('/predict')
 async def predict(file: UploadFile = File(...)):
     try:
-        # Read and preprocess image
         image_bytes = await file.read()
         image = Image.open(io.BytesIO(image_bytes)).convert('RGB')
         input_tensor = preprocess(image).unsqueeze(0).to(DEVICE)
 
-        # Inference
         with torch.no_grad():
             outputs = model(input_tensor)
             probabilities = F.softmax(outputs, dim=1)
@@ -245,7 +216,6 @@ async def predict(file: UploadFile = File(...)):
         predicted_class = CLASSES[predicted_idx.item()]
         probs_dict = {cls: round(float(p), 4) for cls, p in zip(CLASSES, probabilities[0].cpu().tolist())}
 
-        # *** UNCERTAINTY RULE (Constraint #2) ***
         if confidence_val < CONFIDENCE_THRESHOLD:
             return JSONResponse(content={
                 'prediction': 'Uncertain',
@@ -262,3 +232,4 @@ async def predict(file: UploadFile = File(...)):
 
     except Exception as e:
         return JSONResponse(status_code=500, content={'error': str(e)})
+
